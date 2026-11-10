@@ -119,6 +119,7 @@ unsafe extern "C" {
     fn current_history() -> *mut HistEntry;
     fn rl_redisplay();
     fn rl_reset_terminal(name: *const c_char) -> c_int;
+    fn rl_redraw_prompt_last_line();
     fn rl_get_screen_size(rows: *mut c_int, cols: *mut c_int);
     fn rl_extend_line_buffer(len: c_int);
     fn rl_insert_text(text: *const c_char) -> c_int;
@@ -243,6 +244,9 @@ struct State {
     cleared_for: Option<Vec<u8>>,
     shown: Option<Shown>,
     sync_depth: u32,
+    /// Screen size and readline cursor after the last frame of this line.
+    last_frame: Option<((c_int, c_int), (c_int, c_int))>,
+    resizes: u64,
     slots: Vec<(RlFn, Kind)>,
     cache: suggest::Cache,
     rebinds: Vec<(Keymap, CString, Option<RlFn>)>,
@@ -555,10 +559,40 @@ unsafe fn decorate(out: &mut Vec<u8>, full: &[u8], real_end: usize) -> bool {
     }
 }
 
+/// With a custom redisplay function installed, readline's `rl_resize_terminal`
+/// skips its own `_rl_redisplay_after_sigwinch` and only forces a full update,
+/// which would reprint a multi-line prompt from wherever the cursor is. Do what
+/// readline would have done: go back to the line's first row, clear below, and
+/// redraw just the prompt's last line (which comes back here as a normal frame).
+unsafe fn handle_resize() -> bool {
+    unsafe {
+        let (mut rows, mut cols) = (0, 0);
+        rl_get_screen_size(&mut rows, &mut cols);
+        let Some((size, (v, _))) = st().last_frame else { return false };
+        if size == (rows, cols) {
+            return false;
+        }
+        st().last_frame = Some(((rows, cols), (0, 0)));
+        st().resizes += 1;
+        let mut out = Vec::new();
+        if v > 0 {
+            let _ = write!(out, "\x1b[{v}A");
+        }
+        out.extend_from_slice(b"\r\x1b[J");
+        emit(&out);
+        fflush(rl_outstream);
+        rl_redraw_prompt_last_line();
+        true
+    }
+}
+
 unsafe fn frame() {
     unsafe {
         unwrap_last_func();
         ensure_bound();
+        if handle_resize() {
+            return;
+        }
         let t0 = Instant::now();
         sync_begin();
         st().shown = None;
@@ -596,6 +630,9 @@ unsafe fn frame() {
         let compute_ns = t_compute.elapsed().as_nanos();
         emit(&out);
         sync_end();
+        let (mut rows, mut cols) = (0, 0);
+        rl_get_screen_size(&mut rows, &mut cols);
+        st().last_frame = Some(((rows, cols), cursor()));
         let s = st();
         let ns = t0.elapsed().as_nanos().saturating_sub(readline_ns);
         s.frames += 1;
@@ -871,6 +908,7 @@ unsafe extern "C" fn inkline_prep(meta: c_int) {
     guard((), || unsafe {
         let s = st();
         s.memo.clear();
+        s.last_frame = None;
         s.cleared_for = None;
         s.shown = None;
         hook_when_ready()
@@ -959,11 +997,12 @@ fn status() {
     let _ = writeln!(o, "inkline {} ({state}), readline {}.{}", env!("CARGO_PKG_VERSION"), v >> 8, v & 0xff);
     let _ = writeln!(
         o,
-        "frames {}  highlighted {}  layout mismatches {}  terminal repairs {}  internal errors {}  wrapped commands {}",
+        "frames {}  highlighted {}  layout mismatches {}  terminal repairs {}  resizes {}  internal errors {}  wrapped commands {}",
         s.frames,
         s.painted,
         s.mismatches,
         s.repairs,
+        s.resizes,
         s.panics,
         s.slots.len()
     );
