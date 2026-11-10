@@ -28,6 +28,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SO = os.path.join(ROOT, "target", "release", "libinkline.so")
 GHOST_FG = "brightblack"
 
+
+def is_ghost(cell):
+    """Suggestion cells: bright black, not bold (comments are bold bright black)."""
+    return cell.fg == GHOST_FG and not cell.bold
+
 HISTORY = [
     "ls -la /etc",
     "echo hello-world-123",
@@ -110,12 +115,12 @@ class Term:
 
     def ghost_cells(self):
         return [(y, x) for y in range(self.screen.lines) for x in range(self.screen.columns)
-                if self.cell(y, x).fg == GHOST_FG and self.cell(y, x).data != " "]
+                if is_ghost(self.cell(y, x)) and self.cell(y, x).data != " "]
 
     def text_without_ghost(self):
         rows = []
         for y in range(self.screen.lines):
-            rows.append("".join(" " if self.cell(y, x).fg == GHOST_FG else self.cell(y, x).data
+            rows.append("".join(" " if is_ghost(self.cell(y, x)) else self.cell(y, x).data
                                 for x in range(self.screen.columns)).rstrip())
         return rows
 
@@ -198,6 +203,10 @@ def quotes_and_substitution(rc):
         assert t.cell(y, x + 9).fg == "cyan", "$HOME inside quotes"
         dx = t.row(y).find("$(ls)")
         assert t.cell(y, dx).fg == "magenta" and t.cell(y, dx + 2).fg == "green", t.dump()
+        t.type(" # a note")
+        cx = t.row(y).find("# a note")
+        assert all(c.fg == GHOST_FG and c.bold for c in styled(t, y, cx, 8)), "comment: bold bright black"
+        assert not t.ghost_cells(), t.dump()
     finally:
         t.close()
 

@@ -20,7 +20,7 @@ import termios
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from screen_test import ESCAPED_RC, GHOST_FG, SIMPLE_RC, Term  # noqa: E402
+from screen_test import ESCAPED_RC, SIMPLE_RC, Term, is_ghost  # noqa: E402
 
 HISTORY = [
     "git status --short",
@@ -60,7 +60,7 @@ def ghost_text(t):
         t.cell(y, x).data
         for y in range(t.screen.lines)
         for x in range(t.screen.columns)
-        if t.cell(y, x).fg == GHOST_FG
+        if is_ghost(t.cell(y, x))
     )
 
 

@@ -22,6 +22,9 @@ pub enum Style {
     /// `$var` / `\"` inside double quotes, `\n` inside `$'...'`.
     QuotedExpansion,
     Redirection,
+    /// zsh-s-h uses `fg=black,bold`, but Omarchy (like many themes) sets
+    /// palette 0 to the background, which hides comments. Bright black is the
+    /// theme's muted colour; bold keeps them apart from the suggestion (`fg=8`).
     Comment,
     /// `$(`, `)`, backquotes, `<(`.
     Delimiter,
@@ -40,7 +43,7 @@ impl Style {
             Style::Glob | Style::History => "34",
             Style::Quoted | Style::Redirection => "33",
             Style::QuotedExpansion => "36",
-            Style::Comment => "1;30",
+            Style::Comment => "1;90",
             Style::Delimiter => "35",
         }
     }
@@ -57,7 +60,7 @@ impl Style {
             Style::Glob | Style::History => "34;7",
             Style::Quoted | Style::Redirection => "33;7",
             Style::QuotedExpansion => "36;7",
-            Style::Comment => "1;30;7",
+            Style::Comment => "1;90;7",
             Style::Delimiter => "35;7",
         }
     }
