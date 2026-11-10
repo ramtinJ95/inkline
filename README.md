@@ -1,44 +1,36 @@
 # inkline
 
-zsh-style autosuggestions and syntax highlighting for bash, and nothing else.
+**zsh-style autosuggestions and syntax highlighting for bash.**
+
+If you like how zsh feels with zsh-autosuggestions and
+zsh-syntax-highlighting but live in bash, inkline gives you the same
+experience without switching shells, without a heavyweight line editor, and
+without slowing your prompt down.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="demo/demo-dark.svg">
   <img alt="bash with inkline: commands turn green or red as you type, history suggestions appear in grey and are accepted with Right, Alt-F or Ctrl-Y" src="demo/demo-light.svg">
 </picture>
 
-It is a bash loadable builtin written in Rust. GNU readline stays the line
-editor (your inputrc, `bind`, Tab completion, fzf widgets keep working);
-inkline decorates readline's output and follows the zsh plugins' rules:
+## Features
 
-- **Autosuggestions** as in zsh-autosuggestions 0.7.1 (default `history`
-  strategy, `fg=8`): the newest history entry starting with the buffer, shown
-  after the buffer wherever the cursor is, multi-line entries included.
-- **Syntax highlighting** with zsh-syntax-highlighting 0.8.0's `main`
-  highlighter defaults applied to bash syntax: commands/aliases/functions/
-  builtins green, unknown commands bold red, reserved words, strings and
-  redirections yellow, `$var` and escapes inside quotes cyan, existing paths and
-  path prefixes underlined, `*`/`?` blue, `$(…)`/backquote delimiters magenta,
-  precommands (`sudo`, `command`, `exec`, `nice`, …) green underlined with their
-  option arguments understood. Comments are bold bright black (the theme's
-  muted colour) instead of zsh's `fg=black,bold`, which many themes, Omarchy's
-  included, render in the background colour.
-
-All colours are the terminal's 16 palette colours, so they follow the active
-terminal theme.
-
-| Key | With a suggestion shown |
-| --- | --- |
-| Right, End, Ctrl-F, Ctrl-E (cursor at the end) | accept it |
-| Ctrl-Y (`inkline-accept`, zsh's `autosuggest-accept`) | accept it |
-| Alt-F, vi `w`/`e`/… (forward-word motions) | accept as far as the motion moves |
-| Up/Down, history search | hide it until you edit |
+- **Suggestions as you type.** The most recent matching command from your
+  history appears in grey after the cursor. Accept all of it, or one word at a
+  time.
+- **Syntax highlighting.** Valid commands turn green and typos turn red before
+  you press Enter. Strings, variables, paths, globs, redirections and comments
+  each get their own colour.
+- **Matches your theme.** inkline only uses your terminal's palette colours,
+  so it looks right in any theme and changes when you switch themes.
+- **Keeps bash as it is.** GNU readline still does the editing, so your
+  inputrc, `bind` settings, Tab completion and fzf key bindings keep working.
+- **Fast.** About 0.1 ms per keystroke, roughly 40–50× less work than the zsh
+  plugins it imitates. See [Performance](#performance).
 
 ## Install
 
-Needs Linux, Rust 1.85+ and bash linked against GNU readline 8.x. Developed and
-tested on Arch Linux (bash 5.3, readline 8.3); inkline checks the readline
-version when it loads and refuses anything else.
+You need Linux, Rust 1.85 or newer, and bash with GNU readline 8. inkline is
+developed on Arch Linux.
 
 ```bash
 git clone https://github.com/ramtinJ95/inkline ~/src/inkline
@@ -47,8 +39,8 @@ cargo build --release
 install -Dm755 target/release/libinkline.so ~/.local/lib/bash/inkline.so
 ```
 
-Then add to `~/.bashrc`, after any `bind`/inputrc setup, and remove ble.sh or
-other line-editor plugins if you have them:
+Add this to `~/.bashrc`, after any key bindings. If you use ble.sh or a
+similar plugin, remove it first.
 
 ```bash
 if [[ $- == *i* ]]; then
@@ -56,92 +48,58 @@ if [[ $- == *i* ]]; then
 fi
 ```
 
-Open a new terminal and check:
+Open a new terminal and start typing.
 
-```console
-$ inkline status
-inkline 0.1.0 (active), readline 8.3
-frames 3  highlighted 3  layout mismatches 0  terminal repairs 0  resizes 0  internal errors 0  wrapped commands 52
-```
+To update, run `git pull`, then the build and `install` commands again; new
+terminals pick up the new version. To uninstall, delete the lines you added to
+`~/.bashrc` and `~/.local/lib/bash/inkline.so`.
 
-`inkline off` / `inkline on` toggle it for the current shell.
+## Usage
 
-**Update:** `git pull`, rebuild and run the same `install` command; new shells
-load the new build, running ones keep theirs. **Uninstall:** delete the
-`enable -f` line and `~/.local/lib/bash/inkline.so`.
+| Key | What it does |
+| --- | --- |
+| Right, End, Ctrl-F, Ctrl-E or Ctrl-Y at the end of the line | Accept the suggestion |
+| Alt-F (or another forward-word motion) | Accept the next word |
+| Up/Down, history search | Hide the suggestion until you edit the line |
+
+`inkline off` and `inkline on` turn it off and on in the current shell.
+`inkline status` shows whether it's active.
 
 ## Performance
 
-Typing real commands at 80 ms per key into each shell through a pty, 838
-keystrokes per shell, measured by [`bench/compare.sh`](bench/compare.sh):
+CPU time per keystroke, typing real commands into each shell:
 
-| | CPU per keystroke<br>median / p90 | Redraw finished<br>median / p90 | Paste, CPU per char | Enter → next prompt | Shell startup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| plain bash (readline) | 96 / 145 µs | 0.33 / 0.51 ms | 13 µs | 32 ms | 130 ms |
-| **bash + inkline** | **181 / 266 µs** | **0.36 / 0.55 ms** | **16 µs** | **34 ms** | **146 ms** |
-| zsh + zsh-autosuggestions + zsh-syntax-highlighting | 7672 / 14002 µs | 1.36 / 9.69 ms | 1262 µs | 71 ms | 84 ms |
+| | Median | 90th percentile |
+| --- | ---: | ---: |
+| bash | 96 µs | 145 µs |
+| **bash + inkline** | **181 µs** | **266 µs** |
+| zsh + zsh-autosuggestions + zsh-syntax-highlighting | 7,672 µs | 14,002 µs |
 
-inkline adds about 0.1 ms of CPU per keystroke on top of readline; the zsh
-plugins it replicates take 40–50 times as much as bash + inkline. The slowest
-inkline keystroke of the run (3.6 ms) is the first command lookup in a new
-shell, which indexes `$PATH`; loading the builtin adds about 16 ms to startup.
+A command returns to the prompt in 34 ms with inkline (32 ms in plain bash,
+71 ms in zsh). Loading inkline adds about 16 ms to shell startup.
 
-<sub>AMD Ryzen 7 PRO 6850U, `low-power` platform profile, bash 5.3.20,
-zsh 5.9.2, both with the same starship prompt and history. CPU time is the
-shell process's own, from `/proc/<pid>/schedstat`; redraw time is until the
-last byte of the shell's response.</sub>
-
-`bench/compare.sh [BASHRC]` reproduces this. zsh and the two plugins come from
-the official Arch packages (signature-checked, unpacked into
-`~/.cache/inkline-bench`, not installed), with a `.zshrc` mirroring a typical
-macOS setup; the bashrc (default `~/.bashrc`) must load inkline, and is run
-once with and once without it.
+<sub>838 keystrokes per shell on an AMD Ryzen 7 PRO 6850U (low-power mode),
+bash 5.3 and zsh 5.9 with the same prompt and history. Run
+[`bench/compare.sh`](bench/compare.sh) to measure on your machine.</sub>
 
 ## How it works
 
-- While readline redraws, the suggestion is temporarily part of the line
-  buffer, so readline itself wraps, scrolls and erases it like typed text.
-- inkline then recolours the cells. Their positions come from a
-  reimplementation of readline 8.3's line layout (wrapping, wide characters,
-  tabs, `^X` control characters, newlines), checked against readline's real
-  cursor and bottom row before anything is painted; if they disagree the frame
-  is redrawn without the suggestion, so it can never look like typed text.
-  `inkline status` counts such "layout mismatches" (expected: 0).
-- Accept-line, completion listings and other printing commands first redraw
-  without the suggestion; Ctrl-C clears it, keeping readline's `^C`. Nothing
-  grey ends up in scrollback.
-- Every entry point runs under `catch_unwind`; an internal error disables
-  inkline for that shell and readline carries on. The library pins itself so
-  `enable -d inkline` cannot leave dangling pointers in readline.
+inkline is a bash loadable builtin written in Rust. Each time readline redraws
+the line, inkline briefly appends the suggestion to it, so readline wraps and
+erases the suggestion exactly like text you typed. inkline then colours the
+characters in place. Before painting, it checks its idea of where each
+character sits against readline's own cursor; if they disagree, it shows the
+line without decorations instead of risking a garbled screen. If anything goes
+wrong internally, inkline turns itself off and bash carries on as normal.
 
-## Tests
+## Compared to zsh
 
-```bash
-cargo test --release                        # unit tests + property fuzz (3000 cases each)
-INKLINE_FUZZ_ITERS=200000 cargo test --release --test fuzz   # long fuzz; INKLINE_FUZZ_SEED=n to vary
-python3 -m venv .venv && .venv/bin/pip install pyte
-.venv/bin/python tests/screen_test.py       # real bash in a pty, checked through a terminal emulator
-.venv/bin/python tests/screen_test.py --rc ~/some-rc-without-ble   # plus your own prompt/inputrc
-.venv/bin/python tests/fuzz_screen.py --seeds 8 --steps 300 [--rc FILE]
-.venv/bin/python demo/record.py             # re-record the demo above
-```
+inkline follows the defaults of zsh-autosuggestions 0.7.1 and
+zsh-syntax-highlighting 0.8.0, with a few differences:
 
-- `tests/fuzz.rs`: random shell-like and hostile input (invalid UTF-8, control
-  and zero-width characters, wide characters, narrow screens). The
-  highlighter must not panic and must style every byte; layouts must be
-  ordered, non-overlapping and inside the screen; repaint output replayed in a
-  small VT model must put every cell in place and restore the cursor; the
-  suggestion cache must equal a fresh history lookup.
-- `tests/fuzz_screen.py`: the same random key stream (typing, motions, kills,
-  history search, Tab, Ctrl-C, Ctrl-L, terminal resizes) goes to bash with
-  inkline and to plain bash; after every key the screen text (suggestion
-  blanked) and cursor must match. Accepted suggestions are copied into the
-  plain shell.
-
-## Differences from zsh that remain
-
-- `yank`/`yank-pop`: zsh-autosuggestions leaves the previous suggestion
-  displayed (they are "ignore" widgets); inkline fetches one for the new buffer.
-- vi `f`/`t` character search is not a partial-accept motion.
-- Highlighting applies zsh-syntax-highlighting's rules to bash syntax; zsh-only
-  constructs (`noglob`, `=cmd`, global/suffix aliases) do not exist in bash.
+- Comments use the theme's muted grey instead of zsh's bold black, which many themes
+  (Omarchy's included) render invisibly.
+- After a paste from the kill ring (`yank`), inkline shows a suggestion for
+  the new line instead of keeping the old one.
+- vi `f`/`t` jumps don't accept suggestion text.
+- zsh-only syntax such as `noglob` or global aliases doesn't exist in bash.
