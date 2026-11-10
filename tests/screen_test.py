@@ -25,7 +25,7 @@ import traceback
 import pyte
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SO = os.path.join(ROOT, "target", "release", "libinkline.so")
+SO = os.environ.get("INKLINE_SO") or os.path.join(ROOT, "target", "release", "libinkline.so")
 GHOST_FG = "brightblack"
 
 
