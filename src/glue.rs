@@ -77,6 +77,10 @@ const RL_STATE_INITIALIZED: c_ulong = 0x2;
 /// isearch, non-incremental search, history search.
 const RL_STATE_SEARCHING: c_ulong = 0x80 | 0x100 | 0x200;
 const RL_STATE_VIMOTION: c_ulong = 0x100000;
+/// Completion in progress (listing, "Display all N?" query, --More-- pager) or
+/// a command reading an extra key: the cursor is not where readline's line
+/// model says, so painting relative to it would land on the listing.
+const RL_STATE_LINE_OFFSCREEN: c_ulong = 0x4000 | 0x40;
 const RL_STATE_SIGHANDLER: c_ulong = 0x8000;
 const BUILTIN_ENABLED: c_int = 0x1;
 const EX_USAGE: c_int = 258;
@@ -119,6 +123,7 @@ unsafe extern "C" {
     fn current_history() -> *mut HistEntry;
     fn rl_redisplay();
     fn rl_reset_terminal(name: *const c_char) -> c_int;
+    fn rl_redraw_prompt_last_line();
     fn rl_get_screen_size(rows: *mut c_int, cols: *mut c_int);
     fn rl_extend_line_buffer(len: c_int);
     fn rl_insert_text(text: *const c_char) -> c_int;
@@ -137,6 +142,7 @@ unsafe extern "C" {
     fn find_function(name: *const c_char) -> *mut c_void;
     fn find_shell_builtin(name: *const c_char) -> *mut c_void;
     fn find_user_command(name: *const c_char) -> *mut c_char;
+    fn get_string_value(name: *const c_char) -> *mut c_char;
 
     fn fwrite(ptr: *const c_void, size: usize, n: usize, stream: *mut c_void) -> usize;
     fn fflush(stream: *mut c_void) -> c_int;
@@ -242,13 +248,16 @@ struct State {
     /// After a CLEAR widget: no suggestion while the buffer still equals this.
     cleared_for: Option<Vec<u8>>,
     shown: Option<Shown>,
-    sync_depth: u32,
+    path_index: PathIndex,
+    /// Screen size and readline cursor after the last frame of this line.
+    last_frame: Option<((c_int, c_int), (c_int, c_int))>,
+    resizes: u64,
     slots: Vec<(RlFn, Kind)>,
     cache: suggest::Cache,
     rebinds: Vec<(Keymap, CString, Option<RlFn>)>,
     dirs: Vec<(PathBuf, SystemTime, Vec<Vec<u8>>)>,
     /// Lookups for the line being edited; cleared at every new prompt.
-    memo: std::collections::HashMap<(u8, String), u8>,
+    memo: [std::collections::HashMap<String, u8>; 4],
     frames: u64,
     painted: u64,
     mismatches: u64,
@@ -310,24 +319,24 @@ unsafe fn emit(bytes: &[u8]) {
     }
 }
 
-/// Synchronized-update block; nested blocks (a wrapper that redraws twice)
-/// reach the terminal as one.
-fn sync_begin() {
-    let s = st();
-    if s.sync_depth == 0 {
-        unsafe { emit(b"\x1b[?2026h") };
+/// readline's redisplay, after writing what `out` holds so far (the
+/// synchronized-update start). readline flushes its stream when it is done.
+/// (Capturing readline's output to send one write per frame was measured to
+/// add ~40 µs per keystroke; terminals with synchronized updates already show
+/// the frame atomically.)
+unsafe fn redisplay_into(out: &mut Vec<u8>) {
+    unsafe {
+        emit(out);
+        out.clear();
+        rl_redisplay();
     }
-    s.sync_depth += 1;
 }
 
-fn sync_end() {
-    let s = st();
-    s.sync_depth = s.sync_depth.saturating_sub(1);
-    if s.sync_depth == 0 {
-        unsafe {
-            emit(b"\x1b[?2026l");
-            fflush(rl_outstream);
-        }
+/// bash's own value of a shell variable (the process environment can be stale).
+fn bash_var(name: &CStr) -> Option<Vec<u8>> {
+    unsafe {
+        let v = get_string_value(name.as_ptr());
+        (!v.is_null()).then(|| CStr::from_ptr(v).to_bytes().to_vec())
     }
 }
 
@@ -393,21 +402,71 @@ struct BashResolver;
 
 fn expand_tilde(w: &str) -> Cow<'_, str> {
     if w == "~" || w.starts_with("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return Cow::Owned(format!("{home}{}", &w[1..]));
+        if let Some(home) = bash_var(c"HOME") {
+            return Cow::Owned(format!("{}{}", String::from_utf8_lossy(&home), &w[1..]));
         }
     }
     Cow::Borrowed(w)
 }
 
+/// Names in the `$PATH` directories, so "not a command" needs no syscalls.
+/// Validated once per prompt (PATH value and directory mtimes); a hit is
+/// confirmed with bash's own `find_user_command`.
+#[derive(Default)]
+struct PathIndex {
+    path: Vec<u8>,
+    checked: bool,
+    dirs: std::collections::HashMap<PathBuf, (SystemTime, Vec<Vec<u8>>)>,
+    names: std::collections::HashSet<Vec<u8>>,
+    valid: bool,
+}
+
+impl PathIndex {
+    fn ensure(&mut self) {
+        if self.checked && self.valid {
+            return;
+        }
+        self.checked = true;
+        let path = bash_var(c"PATH").unwrap_or_default();
+        let entries: Vec<PathBuf> = path
+            .split(|&b| b == b':')
+            .map(|d| if d.is_empty() { PathBuf::from(".") } else { PathBuf::from(OsStr::from_bytes(d)) })
+            .collect();
+        let mut changed = path != self.path || !self.valid;
+        for d in &entries {
+            let mtime = std::fs::metadata(d).and_then(|m| m.modified()).ok();
+            match (mtime, self.dirs.get(d)) {
+                (Some(t), Some((old, _))) if *old == t => {}
+                (Some(t), _) => {
+                    let names = std::fs::read_dir(d)
+                        .map(|rd| rd.filter_map(Result::ok).map(|e| e.file_name().into_encoded_bytes()).collect())
+                        .unwrap_or_default();
+                    self.dirs.insert(d.clone(), (t, names));
+                    changed = true;
+                }
+                (None, Some(_)) => {
+                    self.dirs.remove(d);
+                    changed = true;
+                }
+                (None, None) => {}
+            }
+        }
+        if changed {
+            self.names = entries.iter().filter_map(|d| self.dirs.get(d)).flat_map(|(_, n)| n.iter().cloned()).collect();
+            self.path = path;
+        }
+        self.valid = true;
+    }
+}
+
 fn memoized(kind: u8, word: &str, f: impl FnOnce() -> u8) -> u8 {
-    if let Some(&hit) = st().memo.get(&(kind, word.to_owned())) {
+    if let Some(&hit) = st().memo[kind as usize].get(word) {
         return hit;
     }
     let v = f();
-    let memo = &mut st().memo;
+    let memo = &mut st().memo[kind as usize];
     if memo.len() < 4096 {
-        memo.insert((kind, word.to_owned()), v);
+        memo.insert(word.to_owned(), v);
     }
     v
 }
@@ -453,6 +512,11 @@ fn command_lookup(word: &str) -> bool {
         if !find_alias(name.as_ptr()).is_null() || !find_function(name.as_ptr()).is_null() || !find_shell_builtin(name.as_ptr()).is_null() {
             return true;
         }
+        let index = &mut st().path_index;
+        index.ensure();
+        if !index.names.contains(word.as_bytes()) {
+            return false;
+        }
         let path = find_user_command(name.as_ptr());
         if path.is_null() {
             return false;
@@ -495,6 +559,7 @@ fn path_prefix_lookup(word: &str, command_position: bool) -> bool {
 unsafe fn decorations_allowed() -> bool {
     unsafe {
         _rl_horizontal_scroll_mode == 0
+            && rl_readline_state & RL_STATE_LINE_OFFSCREEN == 0
             && !_rl_term_up.is_null()
             && *_rl_term_up != 0
             && !rl_line_buffer.is_null()
@@ -519,7 +584,7 @@ unsafe fn decorate(out: &mut Vec<u8>, full: &[u8], real_end: usize) -> bool {
         let modmark = (_rl_mark_modified_lines != 0 && !current_history().is_null() && !rl_undo_list.is_null()) as i64;
         let start = layout::prompt_width(prompt, opts.multibyte, &width) + modmark;
         let point = (rl_point.max(0) as usize).min(full.len());
-        let Some(lay) = layout::layout(full, point, start, &opts, &width) else { return false };
+        let Some(lay) = layout::layout_with_mark(full, point, real_end, start, &opts, &width) else { return false };
         let offset = v as i64 - lay.point.0;
         if lay.point.1 != c as i64 || offset < 0 || lay.end.0 + offset != _rl_vis_botlin as i64 {
             return false;
@@ -527,30 +592,47 @@ unsafe fn decorate(out: &mut Vec<u8>, full: &[u8], real_end: usize) -> bool {
         let real = &full[..real_end];
         let styles = highlight::highlight(real, &BashResolver, st().finishing);
         let region = (rl_mark_active_p() != 0).then(|| (rl_mark.min(rl_point).max(0) as usize, rl_mark.max(rl_point).max(0) as usize));
-        let sgr: Vec<String> = lay
+        let sgr: Vec<&'static str> = lay
             .cells
             .iter()
-            .map(|cell| {
-                if cell.start >= real_end {
-                    return GHOST_SGR.to_owned();
-                }
-                let base = styles[cell.start].sgr();
-                match region {
-                    // readline draws the active region (e.g. a fresh paste) in standout.
-                    Some((a, b)) if cell.start >= a && cell.start < b => {
-                        if base.is_empty() { "7".to_owned() } else { format!("{base};7") }
-                    }
-                    _ => base.to_owned(),
-                }
+            .map(|cell| match region {
+                _ if cell.start >= real_end => GHOST_SGR,
+                // readline draws the active region (e.g. a fresh paste) in standout.
+                Some((a, b)) if cell.start >= a && cell.start < b => styles[cell.start].sgr_standout(),
+                _ => styles[cell.start].sgr(),
             })
             .collect();
-        let sgr: Vec<&str> = sgr.iter().map(String::as_str).collect();
         paint::repaint(out, &lay.cells, &sgr, offset, (v as i64, c as i64), cols as i64);
         if real_end < full.len() {
-            if let Some(r) = layout::layout(real, real_end, start, &opts, &width) {
-                st().shown = Some(Shown { cursor: (v, c), bottom_row: _rl_vis_botlin, real_end: (r.end.0 + offset, r.end.1) });
-            }
+            st().shown = Some(Shown { cursor: (v, c), bottom_row: _rl_vis_botlin, real_end: (lay.mark.0 + offset, lay.mark.1) });
         }
+        true
+    }
+}
+
+/// With a custom redisplay function installed, readline's `rl_resize_terminal`
+/// skips its own `_rl_redisplay_after_sigwinch` and only forces a full update,
+/// which would reprint a multi-line prompt from wherever the cursor is. Do what
+/// readline would have done: go back to the line's first row, clear below, and
+/// redraw just the prompt's last line (which comes back here as a normal frame).
+unsafe fn handle_resize() -> bool {
+    unsafe {
+        let (mut rows, mut cols) = (0, 0);
+        rl_get_screen_size(&mut rows, &mut cols);
+        let Some((size, (v, _))) = st().last_frame else { return false };
+        if size == (rows, cols) {
+            return false;
+        }
+        st().last_frame = Some(((rows, cols), (0, 0)));
+        st().resizes += 1;
+        let mut out = Vec::new();
+        if v > 0 {
+            let _ = write!(out, "\x1b[{v}A");
+        }
+        out.extend_from_slice(b"\r\x1b[J");
+        emit(&out);
+        fflush(rl_outstream);
+        rl_redraw_prompt_last_line();
         true
     }
 }
@@ -559,8 +641,12 @@ unsafe fn frame() {
     unsafe {
         unwrap_last_func();
         ensure_bound();
+        if handle_resize() {
+            return;
+        }
         let t0 = Instant::now();
-        sync_begin();
+        let mut out = Vec::with_capacity(1024);
+        out.extend_from_slice(b"\x1b[?2026h");
         st().shown = None;
         let allowed = decorations_allowed();
         let searching = rl_readline_state & RL_STATE_SEARCHING != 0;
@@ -571,12 +657,11 @@ unsafe fn frame() {
         };
         let full = line().to_vec();
         let t_readline = Instant::now();
-        rl_redisplay();
+        redisplay_into(&mut out);
         let mut readline_ns = t_readline.elapsed().as_nanos();
         restore_buffer(real_end);
 
         let t_compute = Instant::now();
-        let mut out = Vec::with_capacity(512);
         if allowed {
             if decorate(&mut out, &full, real_end as usize) {
                 st().painted += 1;
@@ -586,7 +671,7 @@ unsafe fn frame() {
                 if ghost.is_some() {
                     // Never leave an uncoloured suggestion on screen: let readline erase it.
                     let t = Instant::now();
-                    rl_redisplay();
+                    redisplay_into(&mut out);
                     readline_ns += t.elapsed().as_nanos();
                     let real = line().to_vec();
                     decorate(&mut out, &real, real.len());
@@ -594,8 +679,12 @@ unsafe fn frame() {
             }
         }
         let compute_ns = t_compute.elapsed().as_nanos();
+        out.extend_from_slice(b"\x1b[?2026l");
         emit(&out);
-        sync_end();
+        fflush(rl_outstream);
+        let (mut rows, mut cols) = (0, 0);
+        rl_get_screen_size(&mut rows, &mut cols);
+        st().last_frame = Some(((rows, cols), cursor()));
         let s = st();
         let ns = t0.elapsed().as_nanos().saturating_sub(readline_ns);
         s.frames += 1;
@@ -870,7 +959,9 @@ unsafe fn hook_when_ready() {
 unsafe extern "C" fn inkline_prep(meta: c_int) {
     guard((), || unsafe {
         let s = st();
-        s.memo.clear();
+        s.memo.iter_mut().for_each(|m| m.clear());
+        s.path_index.checked = false;
+        s.last_frame = None;
         s.cleared_for = None;
         s.shown = None;
         hook_when_ready()
@@ -959,11 +1050,12 @@ fn status() {
     let _ = writeln!(o, "inkline {} ({state}), readline {}.{}", env!("CARGO_PKG_VERSION"), v >> 8, v & 0xff);
     let _ = writeln!(
         o,
-        "frames {}  highlighted {}  layout mismatches {}  terminal repairs {}  internal errors {}  wrapped commands {}",
+        "frames {}  highlighted {}  layout mismatches {}  terminal repairs {}  resizes {}  internal errors {}  wrapped commands {}",
         s.frames,
         s.painted,
         s.mismatches,
         s.repairs,
+        s.resizes,
         s.panics,
         s.slots.len()
     );

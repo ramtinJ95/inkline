@@ -44,6 +44,23 @@ impl Style {
             Style::Delimiter => "35",
         }
     }
+
+    /// `sgr` plus standout, for cells in readline's active region.
+    pub fn sgr_standout(self) -> &'static str {
+        match self {
+            Style::Plain => "7",
+            Style::Unknown => "1;31;7",
+            Style::Reserved => "33;7",
+            Style::Command => "32;7",
+            Style::Precommand | Style::Autodirectory => "32;4;7",
+            Style::Path => "4;7",
+            Style::Glob | Style::History => "34;7",
+            Style::Quoted | Style::Redirection => "33;7",
+            Style::QuotedExpansion => "36;7",
+            Style::Comment => "1;30;7",
+            Style::Delimiter => "35;7",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

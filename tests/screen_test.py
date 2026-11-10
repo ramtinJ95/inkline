@@ -121,7 +121,7 @@ class Term:
 
     def status(self):
         """`inkline status` output, unwrapped (rows are joined without separators)."""
-        self.send("\x15inkline status\r", quiet=0.3)
+        self.send("\x05\x15inkline status\r", quiet=0.3)  # End, kill line, run
         return "".join(self.screen.display)
 
     def dump(self):

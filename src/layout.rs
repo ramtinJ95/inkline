@@ -20,6 +20,8 @@ pub struct Cell {
 pub struct Layout {
     pub cells: Vec<Cell>,
     pub point: (i64, i64),
+    /// Screen position of byte index `mark` (see `layout_with_mark`).
+    pub mark: (i64, i64),
     pub end: (i64, i64),
 }
 
@@ -94,12 +96,21 @@ pub fn prompt_width(prompt: &[u8], multibyte: bool, width: &impl Fn(char) -> i32
 }
 
 pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl Fn(char) -> i32) -> Option<Layout> {
+    layout_with_mark(buf, point, point, start_col, o, width)
+}
+
+/// Like `layout`, also reporting where byte index `mark` lands (where readline
+/// would put the cursor if it were there). `None` when the line cannot be
+/// displayed consistently (a tab or wide character wider than the screen);
+/// callers then leave readline's output alone.
+pub fn layout_with_mark(buf: &[u8], point: usize, mark: usize, start_col: i64, o: &Opts, width: &impl Fn(char) -> i32) -> Option<Layout> {
     if o.cols <= 0 || start_col < 0 {
         return None;
     }
     let mut p = Pos { row: start_col / o.cols, lpos: start_col % o.cols, cols: o.cols };
     let mut cells: Vec<Cell> = Vec::with_capacity(buf.len());
     let mut point_pos = None;
+    let mut mark_pos = None;
     let mut i = 0;
     while i < buf.len() {
         let (ch, n) = decode(buf, i, o.multibyte);
@@ -116,6 +127,9 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
         };
         if i == point {
             point_pos = Some((p.row, p.lpos));
+        }
+        if i == mark {
+            mark_pos = Some((p.row, p.lpos));
         }
         let (start, end) = (i, i + n);
         let push = |cells: &mut Vec<Cell>, p: &Pos, text: Vec<u8>, width: i64| {
@@ -136,6 +150,10 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
             let temp = 8 - p.lpos % 8;
             if p.lpos + temp >= o.cols {
                 let first = o.cols - p.lpos;
+                if temp - first >= o.cols {
+                    // Screen narrower than the tab: readline's own row bookkeeping breaks.
+                    return None;
+                }
                 push(&mut cells, &p, vec![b' '; first as usize], first);
                 p.row += 1;
                 p.lpos = temp - first;
@@ -156,12 +174,18 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
                 p.advance();
             }
         } else if o.multibyte && !c.is_ascii() {
+            if w > o.cols {
+                return None; // cannot be displayed on this screen at all
+            }
             if o.cols < p.lpos + w {
                 while p.lpos != 0 {
                     p.advance();
                 }
                 if i == point {
                     point_pos = Some((p.row, p.lpos));
+                }
+                if i == mark {
+                    mark_pos = Some((p.row, p.lpos));
                 }
             }
             if w == 0 {
@@ -186,7 +210,7 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
         i = end;
     }
     let end = (p.row, p.lpos);
-    Some(Layout { cells, point: point_pos.unwrap_or(end), end })
+    Some(Layout { cells, point: point_pos.unwrap_or(end), mark: mark_pos.unwrap_or(end), end })
 }
 
 #[cfg(test)]

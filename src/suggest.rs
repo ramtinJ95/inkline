@@ -5,10 +5,18 @@
 /// `buf` there is no suggestion (older, longer entries are not considered),
 /// exactly as in zsh-autosuggestions. Multi-line entries are included.
 pub fn from_history<'a>(buf: &[u8], newest_first: impl Iterator<Item = &'a [u8]>) -> Option<&'a [u8]> {
+    lookup(buf, newest_first).0
+}
+
+/// (suggestion, whether any entry starts with `buf`).
+fn lookup<'a>(buf: &[u8], mut newest_first: impl Iterator<Item = &'a [u8]>) -> (Option<&'a [u8]>, bool) {
     if buf.is_empty() {
-        return None;
+        return (None, true);
     }
-    newest_first.into_iter().find(|line| line.starts_with(buf)).map(|line| &line[buf.len()..]).filter(|s| !s.is_empty())
+    match newest_first.find(|line| line.starts_with(buf)) {
+        Some(line) => (Some(&line[buf.len()..]).filter(|s| !s.is_empty()), true),
+        None => (None, false),
+    }
 }
 
 /// Remembers the last answer so typing along a suggestion costs O(1), like
@@ -19,6 +27,8 @@ pub fn from_history<'a>(buf: &[u8], newest_first: impl Iterator<Item = &'a [u8]>
 pub struct Cache {
     buf: Vec<u8>,
     suffix: Option<Vec<u8>>,
+    /// Some history entry starts with `buf` (false: no longer buffer can match either).
+    any_match: bool,
     history_key: (i32, i32, usize),
 }
 
@@ -37,13 +47,19 @@ impl Cache {
                 Some(sfx) => sfx.starts_with(&buf[self.buf.len()..]),
                 None => false,
             };
-        if reusable {
+        // Nothing starts with the old buffer, so nothing starts with a longer one.
+        let still_none = same_history && !self.any_match && !self.buf.is_empty() && buf.starts_with(&self.buf);
+        if still_none {
+            self.buf = buf.to_vec();
+        } else if reusable {
             let typed = buf.len() - self.buf.len();
             let sfx = self.suffix.take().map(|s| s[typed..].to_vec()).filter(|s| !s.is_empty());
             self.buf = buf.to_vec();
             self.suffix = sfx;
         } else if !(same_history && buf == self.buf.as_slice()) {
-            self.suffix = from_history(buf, newest_first()).map(<[u8]>::to_vec);
+            let (sfx, any) = lookup(buf, newest_first());
+            self.suffix = sfx.map(<[u8]>::to_vec);
+            self.any_match = any;
             self.buf = buf.to_vec();
             self.history_key = history_key;
         }
