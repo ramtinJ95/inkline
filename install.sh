@@ -64,6 +64,7 @@ echo "Installed $dest"
 if [[ ${INKLINE_NO_BASHRC:-} == 1 ]]; then
   printf 'Left ~/.bashrc alone. To load inkline, add:\n\n%s\n\n' "$snippet"
 elif grep -qsF 'inkline.so' "$rc"; then
+  # shellcheck disable=SC2088 # a path shown to the user, not expanded
   echo "~/.bashrc already loads inkline"
 else
   printf '\n%s\n' "$snippet" >>"$rc"
