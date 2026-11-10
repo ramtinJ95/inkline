@@ -11,6 +11,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/inkline-bench
 bashrc=${1:-$HOME/.bashrc}
+# shellcheck disable=SC2016 # $repo and $arch are literal placeholders in the mirrorlist
 mirror=${INKLINE_BENCH_MIRROR:-$(grep -m1 -oP '^Server = \K.*' /etc/pacman.d/mirrorlist | sed 's|\$repo|extra|; s|\$arch|x86_64|')}
 pkgs=(zsh-5.9.2-1-x86_64 zsh-autosuggestions-0.7.1-1-any zsh-syntax-highlighting-0.8.0-2-any)
 mkdir -p "$cache/pkgs" "$cache/root" "$cache/zdot"
