@@ -1,0 +1,10 @@
+git status
+git commit -m "fix: handle empty buffer"
+ls -la ~/dotfiles/arch-config/
+cat /etc/hosts | grep -v '^#' | sort -u
+cd ~/personal/inkline && cargo build --release
+find . -name '*.rs' -newer Cargo.toml | xargs wc -l
+docker run --rm -it -v "$PWD:/work" -w /work alpine:3.20 sh
+for f in *.md; do echo "== $f"; head -3 "$f"; done
+ssh home-firebat 'journalctl -u tlp --since today | tail -20'
+nvim ~/.config/hypr/hyprland.conf

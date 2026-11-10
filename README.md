@@ -64,15 +64,34 @@ fi
 ## Tests
 
 ```bash
-cargo test                                  # highlighter, suggestions, painting
+cargo test --release                        # unit tests + property fuzz (3000 cases each)
+INKLINE_FUZZ_ITERS=200000 cargo test --release --test fuzz   # long fuzz; INKLINE_FUZZ_SEED=n to vary
 python3 -m venv .venv && .venv/bin/pip install pyte
 .venv/bin/python tests/screen_test.py       # real bash in a pty, checked through a terminal emulator
 .venv/bin/python tests/screen_test.py --rc ~/some-rc-without-ble   # plus your own prompt/inputrc
-cargo run --release --example bench -- ~/.bash_history
+.venv/bin/python tests/fuzz_screen.py --seeds 8 --steps 300 [--rc FILE]
 ```
 
-The screen tests include a randomized edit sequence compared frame by frame
-against plain readline (text and cursor must match exactly).
+- `tests/fuzz.rs`: random shell-like and hostile input (invalid UTF-8, control
+  and zero-width characters, wide characters, narrow screens). The
+  highlighter must not panic and must style every byte; layouts must be
+  ordered, non-overlapping and inside the screen; repaint output replayed in a
+  small VT model must put every cell in place and restore the cursor; the
+  suggestion cache must equal a fresh history lookup.
+- `tests/fuzz_screen.py`: the same random key stream (typing, motions, kills,
+  history search, Tab, Ctrl-C, Ctrl-L, terminal resizes) goes to bash with
+  inkline and to plain bash; after every key the screen text (suggestion
+  blanked) and cursor must match. Accepted suggestions are copied into the
+  plain shell.
+
+## Benchmark
+
+`bench/compare.sh [BASHRC]` measures plain bash, bash + inkline and zsh with
+zsh-autosuggestions 0.7.1 + zsh-syntax-highlighting 0.8.0 (official Arch
+packages, signature-checked, unpacked into `~/.cache/inkline-bench`, not
+installed) with `bench/latency.py`: real commands typed at 80 ms per key
+through a pty, per-keystroke redraw latency and CPU time from
+`/proc/<pid>/schedstat`, plus a burst (paste-speed) run and Enter → prompt.
 
 ## Differences from zsh that remain
 
