@@ -1,8 +1,10 @@
 [package]
 name = "inkline"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "zsh-style autosuggestions and syntax highlighting for bash, as a readline add-on"
+license = "MIT"
+repository = "https://github.com/ramtinJ95/inkline"
 publish = false
 
 [lib]

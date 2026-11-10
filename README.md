@@ -115,3 +115,12 @@ zsh-syntax-highlighting 0.8.0, with a few differences:
   the new line instead of keeping the old one.
 - vi `f`/`t` jumps don't accept suggestion text.
 - zsh-only syntax such as `noglob` or global aliases doesn't exist in bash.
+
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers building, the test suites, the benchmark and releases.
+
+## License
+
+[MIT](LICENSE)
