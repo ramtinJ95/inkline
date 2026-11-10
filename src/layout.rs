@@ -93,6 +93,8 @@ pub fn prompt_width(prompt: &[u8], multibyte: bool, width: &impl Fn(char) -> i32
     w
 }
 
+/// `None` when the line cannot be displayed consistently (a tab or wide
+/// character wider than the screen); callers then leave readline's output alone.
 pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl Fn(char) -> i32) -> Option<Layout> {
     if o.cols <= 0 || start_col < 0 {
         return None;
@@ -136,6 +138,10 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
             let temp = 8 - p.lpos % 8;
             if p.lpos + temp >= o.cols {
                 let first = o.cols - p.lpos;
+                if temp - first >= o.cols {
+                    // Screen narrower than the tab: readline's own row bookkeeping breaks.
+                    return None;
+                }
                 push(&mut cells, &p, vec![b' '; first as usize], first);
                 p.row += 1;
                 p.lpos = temp - first;
@@ -156,6 +162,9 @@ pub fn layout(buf: &[u8], point: usize, start_col: i64, o: &Opts, width: &impl F
                 p.advance();
             }
         } else if o.multibyte && !c.is_ascii() {
+            if w > o.cols {
+                return None; // cannot be displayed on this screen at all
+            }
             if o.cols < p.lpos + w {
                 while p.lpos != 0 {
                     p.advance();
