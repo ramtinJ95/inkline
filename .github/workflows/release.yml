@@ -28,13 +28,12 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Debian 11 has glibc 2.31, so the library also loads on older systems.
-    container: debian:bullseye
+    # AlmaLinux 8 has glibc 2.28, so the library also loads on older systems.
+    container: almalinux:8
     steps:
       - name: Install build tools
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev git
+          dnf install -y gcc git
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
