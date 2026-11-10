@@ -77,6 +77,10 @@ const RL_STATE_INITIALIZED: c_ulong = 0x2;
 /// isearch, non-incremental search, history search.
 const RL_STATE_SEARCHING: c_ulong = 0x80 | 0x100 | 0x200;
 const RL_STATE_VIMOTION: c_ulong = 0x100000;
+/// Completion in progress (listing, "Display all N?" query, --More-- pager) or
+/// a command reading an extra key: the cursor is not where readline's line
+/// model says, so painting relative to it would land on the listing.
+const RL_STATE_LINE_OFFSCREEN: c_ulong = 0x4000 | 0x40;
 const RL_STATE_SIGHANDLER: c_ulong = 0x8000;
 const BUILTIN_ENABLED: c_int = 0x1;
 const EX_USAGE: c_int = 258;
@@ -555,6 +559,7 @@ fn path_prefix_lookup(word: &str, command_position: bool) -> bool {
 unsafe fn decorations_allowed() -> bool {
     unsafe {
         _rl_horizontal_scroll_mode == 0
+            && rl_readline_state & RL_STATE_LINE_OFFSCREEN == 0
             && !_rl_term_up.is_null()
             && *_rl_term_up != 0
             && !rl_line_buffer.is_null()
