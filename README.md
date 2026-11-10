@@ -29,8 +29,27 @@ without slowing your prompt down.
 
 ## Install
 
-You need Linux, Rust 1.85 or newer, and bash with GNU readline 8. inkline is
-developed on Arch Linux.
+```bash
+curl -fsSL https://raw.githubusercontent.com/ramtinJ95/inkline/main/install.sh | bash
+```
+
+Then open a new terminal and start typing.
+
+The [script](install.sh) downloads the prebuilt library for your CPU (x86_64
+or aarch64) from the latest release, checks it, installs it to
+`~/.local/lib/bash/inkline.so` and adds the lines that load it to the end of
+`~/.bashrc`. If you use ble.sh or a similar plugin, remove it from
+`~/.bashrc`.
+
+inkline is tested on Arch Linux and Omarchy. Other Linux distributions with
+bash and GNU readline 8 may work, but haven't been tested yet.
+
+To update, run the install command again. To uninstall, delete the inkline
+lines from `~/.bashrc` and the file `~/.local/lib/bash/inkline.so`.
+
+### Build from source
+
+You need Rust 1.85 or newer.
 
 ```bash
 git clone https://github.com/ramtinJ95/inkline ~/src/inkline
@@ -39,20 +58,13 @@ cargo build --release
 install -Dm755 target/release/libinkline.so ~/.local/lib/bash/inkline.so
 ```
 
-Add this to `~/.bashrc`, after any key bindings. If you use ble.sh or a
-similar plugin, remove it first.
+Then add this to the end of `~/.bashrc`:
 
 ```bash
 if [[ $- == *i* ]]; then
   enable -f ~/.local/lib/bash/inkline.so inkline
 fi
 ```
-
-Open a new terminal and start typing.
-
-To update, run `git pull`, then the build and `install` commands again; new
-terminals pick up the new version. To uninstall, delete the lines you added to
-`~/.bashrc` and `~/.local/lib/bash/inkline.so`.
 
 ## Usage
 
