@@ -7,11 +7,6 @@ zsh-style autosuggestions and syntax highlighting for bash, and nothing else.
   <img alt="bash with inkline: commands turn green or red as you type, history suggestions appear in grey and are accepted with Right, Alt-F or Ctrl-Y" src="demo/demo-light.svg">
 </picture>
 
-<sub>Typed live into bash + inkline through a pty (scripted by
-[`demo/record.py`](demo/record.py)). Shown with Omarchy's Tokyo Night or
-Catppuccin Latte palette depending on your GitHub theme; inkline only uses the
-terminal's palette colours, so it takes on whatever theme the terminal has.</sub>
-
 It is a bash loadable builtin written in Rust. GNU readline stays the line
 editor (your inputrc, `bind`, Tab completion, fzf widgets keep working);
 inkline decorates readline's output and follows the zsh plugins' rules:
@@ -25,7 +20,12 @@ inkline decorates readline's output and follows the zsh plugins' rules:
   redirections yellow, `$var` and escapes inside quotes cyan, existing paths and
   path prefixes underlined, `*`/`?` blue, `$(…)`/backquote delimiters magenta,
   precommands (`sudo`, `command`, `exec`, `nice`, …) green underlined with their
-  option arguments understood, comments `fg=black,bold`.
+  option arguments understood. Comments are bold bright black (the theme's
+  muted colour) instead of zsh's `fg=black,bold`, which many themes, Omarchy's
+  included, render in the background colour.
+
+All colours are the terminal's 16 palette colours, so they follow the active
+terminal theme.
 
 | Key | With a suggestion shown |
 | --- | --- |
