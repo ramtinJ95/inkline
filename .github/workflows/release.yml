@@ -1,0 +1,70 @@
+name: release
+
+# Builds the library for x86_64 and aarch64 and attaches it, with SHA256SUMS,
+# to the GitHub release of the tag. install.sh downloads from there.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach binaries to
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  RUST_VERSION: "1.95.0"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # Debian 11 has glibc 2.31, so the library also loads on older systems.
+    container: debian:bullseye
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev git
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - run: cargo test --release --locked
+      - run: cargo build --release --locked
+      - run: |
+          mkdir dist
+          cp target/release/libinkline.so "dist/inkline-${{ matrix.arch }}-linux.so"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inkline-${{ matrix.arch }}
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum inkline-*.so > SHA256SUMS
+          cat SHA256SUMS
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "inkline ${TAG#v}" --generate-notes
+          gh release upload "$TAG" inkline-*.so SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
